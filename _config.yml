@@ -14,12 +14,12 @@ timezone:
 # jekyll-seo-tag settings › https://github.com/jekyll/jekyll-seo-tag/blob/master/docs/usage.md
 # ↓ --------------------------
 
-title: Chirpy # the main title
+title: Yeonho's 개발자 블로그 # the main title
 
-tagline: A text-focused Jekyll theme # it will display as the subtitle
+tagline: 개발 지식 공유 및 정리 # it will display as the subtitle
 
-description: >- # used by seo meta and the atom feed
-  A minimal, responsive and feature-rich Jekyll theme for technical writing.
+description: >- # 블로그의 목적과 내용을 설명하는 짧은 문장
+  프론트엔드 개발과 UI/UX 설계에 관한 지식과 프로젝트 경험을 공유하는 블로그입니다. 최신 개발 트렌드, 문제 해결 과정, 그리고 실무에 적용할 수 있는 다양한 인사이트를 제공합니다.
 
 # Fill in the protocol & hostname for your site.
 # E.g. 'https://username.github.io', note that it does not end with a '/'.
