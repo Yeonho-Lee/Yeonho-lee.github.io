@@ -23,13 +23,13 @@ description: >- # 블로그의 목적과 내용을 설명하는 짧은 문장
 
 # Fill in the protocol & hostname for your site.
 # E.g. 'https://username.github.io', note that it does not end with a '/'.
-url: "https://yeonho-lee.github.io"
+url: "https://yeonho-lee.github.io/"
 
 github:
   username: Yeonho-Lee # change to your GitHub username
 
 twitter:
-  username: twitter_username # change to your Twitter username
+  username: # change to your Twitter username
 
 social:
   # Change to your full name.
@@ -38,8 +38,8 @@ social:
   email: example@domain.com # change to your email address
   links:
     # The first element serves as the copyright owner's link
-    - https://twitter.com/username # change to your Twitter homepage
-    - https://github.com/username # change to your GitHub homepage
+    # change to your Twitter homepage
+    - https://github.com/Yeonho-Lee # change to your GitHub homepage
     # Uncomment below to add more social links
     # - https://www.facebook.com/username
     # - https://www.linkedin.com/in/username
