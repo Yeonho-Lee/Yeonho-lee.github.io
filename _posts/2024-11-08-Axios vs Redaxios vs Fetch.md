@@ -6,7 +6,7 @@ date created: 2024-10-26-09:04
 date modified: 2024-11-08-14:27
 ---
 
-# HTTP 요청 라이브러리 비교: Axios, Redaxios, Fetch
+## HTTP 요청 라이브러리 비교: Axios, Redaxios, Fetch
 
 프로젝트에서 Node.js 환경에서의 크롤링을 위해 HTTP 요청 라이브러리를 사용하게 되었다.
 특히 Node.js 18부터 Fetch API가 기본으로 내장되면서, 기존에 많이 쓰이던 Axios와 Redaxios, 그리고 Fetch의 차이점을 비교해봤다.
