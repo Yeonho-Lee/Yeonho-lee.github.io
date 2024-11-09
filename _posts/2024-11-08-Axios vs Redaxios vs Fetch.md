@@ -16,11 +16,13 @@ date modified: 2024-11-08-14:27
 - Node.js 18 이전에 주로 사용된 서드파티 라이브러리
 - Promise 기반으로, `fetch`보다 간단한 API와 추가 기능(예: JSON 자동 변환, 요청/응답 인터셉터)을 제공함
 - 한계: 사실상 fetch가 기본으로 내장된 Node.js 18이상에서는 필수적이지 않음
+
 ## **Redaxios**
     
 - `fetch`가 Node.js에 내장되면서 등장한 `fetch` 기반 라이브러리
 - `axios`와 비슷한 인터페이스를 제공하며, `fetch`와 호환됨
 - 한계: 기능이 간소화되어 Axios의 고급기능(예: JSON 자동 변환, 인터셉터)은 제공하지 않음
+
 ## **Fetch**
 
 - Node.js 18부터 기본적으로 지원
