@@ -3,7 +3,7 @@ title: JavaScript Date 객체의 위험성
 categories: JavaScript Date
 tags: javascript date utc frontend
 date created: 2025-09-21-22:50
-date modified: 2025-09-22-09:17
+date modified: 2025-09-22-18:12
 ---
 ## **JavaScript `Date` 객체의 위험성
 
@@ -13,56 +13,20 @@ JavaScript에서 날짜와 시간을 다룰 때 흔히 사용하는 `Date` 객�
 
 ## **`Date` 객체 메서드의 문제점 🚨
 ### Date.parse(): 로컬시간 vs UTC
+
 ```js
 console.log(new Date(Date.parse('Sep 22, 2025')));
 // Output: 2025-09-21T15:00:00.000Z
 ```
+
 위와 같이 연월일을 포함한 문자열은 JavaScript 엔진이 사용자의 **로컬 시간**으로 인식한다. 따라서 한국에서 실행하면 대한민국 표준시(GMT+0900)의 자정에 맞춰 Date 객체를 생성한다. 콘솔에는 이 로컬 시간을 UTC로 변환한 시간대가 찍힌다.
+
 ```js
 console.log(new Date(Date.parse('2025-09-22')));
 // Output: 2025-09-22T00:00:00.000Z
+
 ```
 반면에, **ISO 8601형식**(YYYY-MM-DD)의 문자열은 똑같이 시간대 정보가 없음에도 불구하고 UTC 기준으로 해석된다.
-
-
-
-
-
-
-
-`Date` 객체의 메서드들은 대부분 사용자의 로컬 시간을 기준으로 작동한다. 이는 개발 환경과 실제 서비스 환경의 시간대가 다를 때 심각한 오류로 이어질 수 있다.
-
-예를 들어, 한국에서 `new Date()`를 생성하면 한국 표준시(KST)가 적용되지만, 미국 사용자가 같은 코드를 실행하면 해당 사용자의 로컬 시간인 태평양 표준시(PST)가 적용된다. 데이터베이스에 저장된 시간이 사용자마다 제각각이라면 데이터 정합성이 깨질 수밖에 없다.
-```js
-// 현재 한국 시간: 2025년 9월 21일 22시 00분
-// UTC 기준 시간: 2025년 9월 21일 13시 00분 (KST는 UTC보다 9시간 빠름)
-
-// 한국에서 생성된 Date 객체
-const userDate = new Date('2025-09-22T00:00:00.000'); 
-// 사용자 로컬 시간으로 변환됨
-// getMonth()는 9 (10월)이 아니라 8 (9월)을 반환함
-// getDate()는 22를 반환
-
-// 사용자에게 날짜를 보여주는 함수
-const getMonthAndDay = (date) => {
-  const month = date.getMonth() + 1; // 9월이므로 9
-  const day = date.getDate(); // 22일이므로 22
-  return `${month}월 ${day}일`;
-};
-
-// 한국 사용자의 결과: "9월 22일"
-console.log(getMonthAndDay(userDate));
-
-// 이 코드를 미국(태평양 시간, UTC-8)에서 실행하면?
-// 미국에서는 '2025-09-21T00:00:00.000Z'가
-// 현지 시간으로 '2025-09-20 17:00:00'이 됨
-
-const userDateInUSA = new Date('2025-09-21T00:00:00.000Z');
-console.log(getMonthAndDay(userDateInUSA));
-// 미국 사용자의 결과: "9월 20일"
-```
-
-위 코드는 `Date` 객체가 `getMonth()`나 `getDate()` 같은 로컬 기반 메서드를 사용할 때, 어떤 시간대에서 실행되느냐에 따라 다른 결과를 반환하는 문제를 명확하게 보여줍니다.
 
 ---
 ## 해결책
@@ -112,11 +76,11 @@ console.log(getSafeMonthAndDay(safeDateInUSA));
 
 ## **결론: `Date` 객체, 현명하게 사용하는 법**
 
-`Date` 객체는 직관적이지만, **로컬 타임존**이라는 함정이 숨겨져 있습니다. 로컬 시간을 기반으로 작동하는 메서드들은 전 세계 사용자를 대상으로 하는 서비스에서 예측 불가능한 버그를 일으킬 수 있습니다.
+`Date` 객체는 직관적이지만, **로컬 타임존**이라는 함정이 있다. 로컬 시간을 기반으로 작동하는 메서드들은 전 세계 사용자를 대상으로 하는 서비스에서 예측 불가능한 버그를 일으킬 수 있다.
 
-따라서 서버와 데이터를 주고받을 때는 `toISOString()`을 사용해 **UTC 기준 시간**을 저장하고, `getUTCMonth()`와 같은 **UTC 기반 메서드**를 사용해야 합니다.
+따라서 서버와 데이터를 주고받을 때는 `toISOString()`을 사용해 **UTC 기준 시간**을 저장하고, `getUTCMonth()`와 같은 **UTC 기반 메서드**를 사용해야 한다.
 
-`Date` 객체는 화면에 **시간을 보여주는 용도**로만 사용하고, 데이터 처리와 저장에는 UTC를 사용하는 것이 **안전하고 견고한 애플리케이션을 만드는 가장 확실한 방법**입니다.
+`Date` 객체는 화면에 **시간을 보여주는 용도**로만 사용하고, 데이터 처리와 저장에는 UTC를 사용하는 것이 **안전하고 견고한 애플리케이션을 만드는 가장 확실한 방법**이다.
 
 ## Reference
 [Date - JavaScript | MDN](https://developer.mozilla.org/ko/docs/Web/JavaScript/Reference/Global_Objects/Date)
