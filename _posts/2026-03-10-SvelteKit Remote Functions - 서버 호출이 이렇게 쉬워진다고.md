@@ -3,12 +3,12 @@ title: SvelteKit Remote Functions - 서버 호출이 이렇게 쉬워진다고?
 categories: [Web, SvelteKit]
 tags: [sveltekit, svelte, remote-function, typescript]
 date created: 2026-03-11-00:49
-date modified: 2026-03-12-00:59
+date modified: 2026-03-14-00:08
 ---
 
-SvelteKit로 간단한 어드민 페이지를 만들다가 생각보다 파일이 너무 많아진다는 걸 느꼈다. 폼 하나 만드는데 스키마 파일, `+page.server.js`, `+page.svelte` 세 파일을 왔다 갔다 하면서 같은 검증 로직을 두 번 연결하고 있었다. 분명히 더 나은 방법이 있을 것 같아서 찾아보다가 Remote Function을 알게 됐다.
+SvelteKit을 쓰다 보면 서버에서 데이터를 읽거나, 폼을 제출하거나, 버튼 클릭으로 서버 작업을 실행하는 일이 자주 있다.
 
-Remote Function은 서버에서 데이터를 읽거나, 폼을 제출하거나, 버튼 클릭으로 서버 작업을 실행하는 일들을 **로컬 함수를 호출하듯이** 쓸 수 있게 해주는 SvelteKit의 기능이다.
+Remote Function은 이런 작업들을 **로컬 함수를 호출하듯이** 쓸 수 있게 해주는 SvelteKit의 기능이다.
 
 ---
 
@@ -24,301 +24,352 @@ src/routes/blog/data.remote.ts
 
 원래 서버 코드는 클라이언트에서 직접적으로 호출할 수 없지만, remote function을 사용하면 SvelteKit이 fetch 요청으로 변환해주기 때문에, 개발자 입장에선 그냥 로컬 함수를 호출하는 것처럼 쓸 수 있다.
 
-이 개념 자체는 **RPC(Remote Procedure Call)**라는 이름으로 오래전부터 존재해왔다. RPC는 네트워크 너머에 있는 함수를 마치 로컬 함수인 것처럼 호출할 수 있게 해주는 패턴이다. 클라이언트가 직접 HTTP 요청을 구성하거나 URL을 신경 쓸 필요 없이, 함수 이름과 인자만으로 서버 로직을 실행할 수 있다는 게 핵심이다.
-
-tRPC나 gRPC 같은 라이브러리가 이 패턴을 구현한 대표적인 예고, SvelteKit Remote Function도 같은 맥락에 있다. 다만 별도 라이브러리 없이 프레임워크 수준에서 지원한다는 점이 다르다.
-
 ---
 
 ## 세 가지 Remote Function
 
-|함수|용도|
-|---|---|
-|`query`|데이터 읽기 (SELECT)|
-|`form`|폼 제출 (HTML form 연동)|
-|`command`|서버 작업 실행 (버튼 클릭 등)|
+| 함수      | 용도                          |
+| --------- | ----------------------------- |
+| `query`   | 데이터 읽기 (SELECT)          |
+| `form`    | 폼 제출 (HTML form 연동)      |
+| `command` | 서버 작업 실행 (버튼 클릭 등) |
 
 ---
 
 ## 1. query — 데이터 읽기
 
+> `query` 함수는 서버에서 동적 데이터를 읽을 수 있게 해준다. (정적 데이터는 `prerender`를 고려하자.)
+
 ### 기존 방식
 
-`+page.server.js`에서 `load()`를 만들고, 컴포넌트에서 `$props()`로 받아야 했다.
+`+page.server.ts`에서 `load()`를 만들고, 컴포넌트에서 `$props()`로 받아야 했다.
 
-
-```js
-// src/routes/blog/+page.server.js
-import * as db from '$lib/server/database';
-
-export async function load() {
-  const posts = await db.getPosts();
+```ts
+// +page.server.ts
+export async function load({ fetch }) {
+  const response = await fetch(
+    "https://jsonplaceholder.typicode.com/posts?_limit=5",
+  );
+  const posts = await response.json();
   return { posts }; // 반드시 return 해야 함
 }
 ```
+
 ```svelte
-<!-- src/routes/blog/+page.svelte -->
+<!-- +page.svelte -->
 <script>
-  let { data } = $props(); // load()의 return 값을 여기서 받음
+	let { data } = $props(); // load()의 return 값을 여기서 받음
 </script>
 
 {#each data.posts as post}
-  <p>{post.title}</p>
+	<p>{post.title}</p>
 {/each}
 ```
 
+서버에서 데이터를 가져오려면 `load()` → `return` → `$props()`라는 세 단계를 반드시 거쳐야 한다. 데이터를 만드는 곳(`+page.server.ts`)과 쓰는 곳(`+page.svelte`)이 분리되어 있어서, 필드 하나 추가할 때도 양쪽을 오가며 수정해야 한다.
+
 ### Remote Function 방식
 
-
 ```ts
-// src/routes/blog/data.remote.ts
-import { query } from '$app/server';
-import * as db from '$lib/server/database';
+// data.remote.ts
+import { query } from "$app/server";
 
 export const getPosts = query(async () => {
-  return await db.getPosts();
+  const response = await fetch(
+    "https://jsonplaceholder.typicode.com/posts?_limit=5",
+  );
+  return await response.json();
 });
 ```
 
-> [!WARNING]
-> `<script>` 블록에서의 top-level `await`는 현재 SvelteKit의 **실험적 기능**이다. 프로덕션 사용 시 주의가 필요하다.
-
 ```svelte
-<!-- src/routes/blog/+page.svelte -->
+<!-- +page.svelte -->
 <script>
-  import { getPosts } from './data.remote';
+	import { getPosts } from './data.remote';
 
-  const posts = await getPosts();
+	const posts = await getPosts(); // 그냥 바로 호출!
 </script>
 
 {#each posts as post}
-  <p>{post.title}</p>
+	<p>{post.title}</p>
 {/each}
 ```
 
-> [!NOTE]
-> **실행 흐름 차이**
->
-> 기존 방식에서는 `+page.server.js`의 `load()`가 먼저 완료된 뒤에 페이지 렌더링이 시작된다.
-> Remote Function 방식에서는 컴포넌트 렌더링 도중 `await`를 만나면 그 지점에서 렌더링이 일시 중단되고, 비동기 작업이 끝나면 재개된다.
-> 두 방식 모두 데이터를 받아오기 전까지 렌더링이 블로킹된다는 점은 동일하다.
-
-`load()`, `return`, `$props()` 없이 **바로 호출**할 수 있다.
+`load()`, `return`, `$props()` 없이 **바로 호출**할 수 있다. 데이터를 정의하고 사용하는 흐름이 일반 함수 호출과 같아서, 파일을 오갈 필요가 없다.
 
 ---
 
-## 2. form — 폼 제출
+## 2. command — 버튼 클릭으로 서버 작업 실행
 
-### 기존 방식
-
-`+page.server.js`에 `actions`를 따로 정의하고, 폼에서 `action` 속성으로 연결해야 했다.
-
-유효성 검사도 서버와 클라이언트에 **각각 따로** 작성해야 했다.
-
-```ts
-// src/routes/admin/users/schema.ts
-import * as v from 'valibot';
-
-export const AddUserSchema = v.object({
-  contact: v.pipe(v.string(), v.minLength(1, '연락처를 입력해주세요')),
-  type: v.picklist(['email', 'phone'], '올바른 타입을 선택해주세요'),
-});
-```
-```js
-// src/routes/admin/users/+page.server.js
-import * as v from 'valibot';
-import { AddUserSchema } from './schema';
-
-export const actions = {
-  addUser: async ({ request, locals }) => {
-    // 인증 체크를 매번 직접 작성해야 함
-    if (!locals.session || locals.session.role !== 'admin') {
-      redirect(303, '/login');
-    }
-
-    const formData = await request.formData();
-
-    // Object.fromEntries(formData)의 타입은 Record<string, FormDataEntryValue>로,
-    // FormDataEntryValue는 string | File의 유니온 타입이다.
-    // 반면 AddUserSchema는 v.object()로 정의된 순수 객체 형태를 기대하므로,
-    // 타입이 엄밀히 호환되지 않는다.
-    // v.safeParse가 런타임에서 string을 처리해주긴 하지만,
-    // TypeScript 타입 레벨에서는 불일치가 발생한다.
-    const raw = Object.fromEntries(formData);
-
-    // 서버에서 한 번 더 검사
-    const result = v.safeParse(AddUserSchema, raw);
-    if (!result.success) {
-      return fail(400, { errors: v.flatten(result.issues) });
-    }
-
-    await db.insert(userTable).values(result.output);
-  }
-};
-```
-```svelte
-<!-- src/routes/admin/users/+page.svelte -->
-<script>
-  let errors = {};
-
-  // 클라이언트에서 또 한 번 검사
-  // (서버와 동일한 스키마를 쓰더라도 검사 코드를 별도로 연결해야 한다)
-  function handleSubmit(e) {
-    const raw = Object.fromEntries(new FormData(e.target));
-    const result = v.safeParse(AddUserSchema, raw);
-    if (!result.success) {
-      errors = v.flatten(result.issues);
-      e.preventDefault();
-    }
-  }
-</script>
-
-<form method="POST" action="?/addUser" onsubmit={handleSubmit}>
-  <input name="contact" />
-  {#if errors.contact}<span>{errors.contact}</span>{/if}
-
-  <input name="type" />
-  {#if errors.type}<span>{errors.type}</span>{/if}
-
-  <button type="submit">추가</button>
-</form>
-```
-
-스키마를 정의해도 서버/클라이언트 양쪽에 검사 코드를 **따로 연결**해야 해서 번거롭다. 스키마를 공유하면 끝날 것 같은데, 실제로는 연결하는 코드가 계속 붙는다. 결국 파일 세 개를 동시에 열어두고 작업하게 된다.
-
-### Remote Function 방식
-
-`form(Schema, handler)` 형태로 스키마를 넘기면, **클라이언트 사이드 validation이 자동으로 적용**된다.
-```ts
-// src/routes/admin/users/schema.ts
-import * as v from 'valibot';
-
-export const AddUserSchema = v.object({
-  contact: v.pipe(v.string(), v.minLength(1, '연락처를 입력해주세요')),
-  type: v.picklist(['email', 'phone'], '올바른 타입을 선택해주세요'),
-});
-```
-```ts
-// src/routes/admin/users/data.remote.ts
-import { form } from '$app/server';
-import { AddUserSchema } from './schema';
-
-export const addUser = form(AddUserSchema, async (data, issue) => {
-  // 인증 체크를 한 줄로
-  requireSession('admin');
-
-  // data는 이미 스키마 검증이 끝난 상태
-  // (FormData → 스키마 파싱 → 타입 안전한 객체로 변환까지 SvelteKit이 처리)
-  const existing = await db.query.userTable.findFirst({
-    where: { contact: data.contact, type: data.type },
-  });
-
-  if (existing) {
-    invalid(issue.contact('이미 등록된 사용자입니다'));
-  }
-
-  const [user] = await db
-    .insert(userTable)
-    .values({ contact: data.contact, type: data.type })
-    .returning({ id: userTable.id });
-
-  return { id: user!.id };
-});
-```
-```svelte
-<!-- src/routes/admin/users/+page.svelte -->
-<script>
-  import { addUser } from './data.remote';
-</script>
-
-<!-- use:addUser 하나로 클라이언트 validation + 서버 제출 모두 처리 -->
-<form use:addUser>
-  <input name="contact" />
-  <input name="type" />
-  <button type="submit">추가</button>
-</form>
-```
-
-> [!IMPORTANT]
-> **클라이언트/서버 validation이 모두 실행되는 건 동일하다**
->
-> Remote Function을 쓴다고 해서 validation을 한 번만 실행하는 것이 아니다.
-> 제출 시 클라이언트에서 스키마 검사가 먼저 실행되고, 통과하면 서버에서 다시 검증된다.
-> 달라지는 건 그 동작을 **직접 코드로 연결하지 않아도 된다**는 점이다.
-> 스키마를 `form()`에 한 번만 넘기면, SvelteKit이 양쪽 검사를 알아서 연결해준다.
-
-처음 봤을 때 `use:addUser` 한 줄짜리 폼이 실제로 동작한다는 게 믿기지 않았다. 에러 표시는 어디서 하나 싶었는데, 그것도 알아서 처리해준다.
-
----
-
-## 3. command — 버튼 클릭으로 서버 작업 실행
+> `command` 함수는 `form`과 마찬가지로 서버에 데이터를 쓸 수 있게 해준다. `form`과 다른 점은 특정 엘리먼트에 종속되지 않아서 어디서든 호출할 수 있다는 것이다.
 
 폼 제출이 아니라, 버튼 클릭 같은 이벤트로 서버 작업을 실행할 때 쓴다.
 
 ### 기존 방식
 
-API 엔드포인트를 따로 만들고, `fetch`로 직접 호출해야 했다.
-```js
-// src/routes/api/post/delete/+server.js
-export async function POST({ request }) {
-  const { id } = await request.json();
-  await db.deletePost(id);
-  return new Response('ok');
+버튼 클릭 하나에도 `<form>`으로 감싸고 form action을 정의해야 했다.
+
+```ts
+// +page.server.ts
+import { fail } from "@sveltejs/kit";
+
+export function load() {
+  return { likes: 0 };
 }
+
+export const actions = {
+  like: async ({ fetch }) => {
+    const response = await fetch(
+      "https://jsonplaceholder.typicode.com/posts/1",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ likes: 1 }),
+      },
+    );
+
+    if (!response.ok) {
+      return fail(500, { message: "Failed to add like" });
+    }
+
+    return { success: true };
+  },
+};
 ```
+
 ```svelte
-<!-- src/routes/blog/+page.svelte -->
+<!-- +page.svelte -->
 <script>
-  async function handleDelete(id) {
-    await fetch('/api/post/delete', {
-      method: 'POST',
-      body: JSON.stringify({ id }),
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+	import { enhance } from '$app/forms';
+
+	let { data } = $props();
+	let likes = $derived(data.likes);
+	let localLikes = $state(0);
 </script>
 
-<button onclick={() => handleDelete(post.id)}>삭제</button>
+<p>Likes: {likes + localLikes}</p>
+
+<form method="POST" action="?/like" use:enhance={() => {
+	return async ({ result }) => {
+		if (result.type === 'success') {
+			localLikes += 1;
+		}
+	};
+}}>
+	<button>Like</button>
+</form>
 ```
+
+좋아요 버튼 하나 만드는데 `<form method="POST">`, `action="?/like"`, `use:enhance`, `result.type` 분기까지 필요하다. 버튼인데 폼으로 감싸야 하는 것 자체가 어색하다.
 
 ### Remote Function 방식
 
 ```ts
-// src/routes/blog/data.remote.ts
-import { command } from '$app/server';
-import * as db from '$lib/server/database';
+// actions.remote.ts
+import { command } from "$app/server";
 
-export const deletePost = command(async ({ id }: { id: number }) => {
-  await db.deletePost(id);
+export const addLike = command(async () => {
+  const response = await fetch("https://jsonplaceholder.typicode.com/posts/1", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ likes: 1 }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to add like");
+  }
 });
 ```
+
 ```svelte
-<!-- src/routes/blog/+page.svelte -->
+<!-- +page.svelte -->
 <script>
-  import { deletePost } from './data.remote';
+	import { addLike } from './actions.remote';
+
+	let likes = $state(0);
 </script>
 
-<button onclick={() => deletePost({ id: post.id })}>삭제</button>
+<p>Likes: {likes}</p>
+
+<button onclick={async () => {
+	await addLike();
+	likes += 1;
+}}>Like</button>
 ```
 
-API 파일도 없고, `fetch`도 없고, URL도 없다.
+`<form>` 없이 `onclick`에서 바로 `await addLike()`를 호출한다. form action, `use:enhance`, `result.type` 분기가 전부 사라지고, 일반적인 이벤트 핸들러 패턴 그대로 서버 작업을 실행할 수 있다.
+
+---
+
+## 3. form — 폼 제출
+
+> `form` 함수는 서버에 데이터를 쓰기 쉽게 해준다. 제출된 `FormData`에서 만들어진 `data`를 받는 콜백을 인자로 받고, `<form>` 엘리먼트에 spread할 수 있는 객체를 반환한다.
+
+### 기존 방식
+
+`+page.server.ts`에 `actions`를 정의하고, `formData`를 수동으로 파싱하고, 유효성 검사도 직접 작성해야 했다. 클라이언트 쪽에서는 HTML `required` 속성을 따로 추가해야 하고, 서버 응답을 받아 처리하는 코드도 별도로 필요하다.
+
+```ts
+// +page.server.ts
+import { fail } from "@sveltejs/kit";
+
+export const actions = {
+  create: async ({ request, fetch }) => {
+    const formData = await request.formData();
+    const title = formData.get("title")?.toString();
+    const body = formData.get("body")?.toString();
+
+    if (!title || !body) {
+      return fail(400, { message: "Title and body are required" });
+    }
+
+    const response = await fetch("https://jsonplaceholder.typicode.com/posts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, userId: 1 }),
+    });
+
+    if (!response.ok) {
+      return fail(500, { message: "Failed to create post" });
+    }
+
+    const post: { title: string; id: number } = await response.json();
+    return { post };
+  },
+};
+```
+
+```svelte
+<!-- +page.svelte -->
+<script lang="ts">
+	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
+
+	interface Post {
+		title: string;
+		id: number;
+	}
+
+	let result: Post | null = $state(null);
+
+	const form = page.form as { post: Post } | null;
+	$effect(() => {
+		if (form?.post) {
+			result = form.post;
+		}
+	});
+</script>
+
+<h2>Create Post</h2>
+
+<form method="POST" action="?/create" use:enhance>
+	<label>
+		Title
+		<input name="title" type="text" required />
+	</label>
+	<label>
+		Body
+		<textarea name="body" required></textarea>
+	</label>
+	<button>Create</button>
+</form>
+
+{#if result}
+	<p>Created: {result.title} (id: {result.id})</p>
+{/if}
+```
+
+서버에서는 `formData.get()`으로 하나하나 꺼내서 `?.toString()`으로 변환하고, `if (!title || !body)` 같은 검사를 직접 작성해야 한다. 클라이언트에서는 HTML `required`로 같은 검증을 **또** 작성하고, 서버 응답을 받으려면 `page.form`에서 `$effect`로 꺼내야 한다.
+
+### Remote Function 방식
+
+```ts
+// data.remote.ts
+import * as v from "valibot";
+import { form } from "$app/server";
+
+export const createPost = form(
+  v.object({
+    title: v.pipe(v.string(), v.nonEmpty()),
+    body: v.pipe(v.string(), v.nonEmpty()),
+  }),
+  async ({ title, body }) => {
+    const response = await fetch("https://jsonplaceholder.typicode.com/posts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, userId: 1 }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to create post");
+    }
+
+    return await response.json();
+  },
+);
+```
+
+```svelte
+<!-- +page.svelte -->
+<script>
+	import { createPost } from './data.remote';
+	import * as v from 'valibot';
+
+	const schema = v.object({
+		title: v.pipe(v.string(), v.nonEmpty('Title is required')),
+		body: v.pipe(v.string(), v.nonEmpty('Body is required'))
+	});
+</script>
+
+<h2>Create Post</h2>
+
+<form {...createPost.preflight(schema)}>
+	<label>
+		Title
+		<input {...createPost.fields.title.as('text')} />
+		{#each createPost.fields.title.issues() as issue}
+			<p style="color: red">{issue.message}</p>
+		{/each}
+	</label>
+	<label>
+		Body
+		<textarea {...createPost.fields.body.as('text')}></textarea>
+		{#each createPost.fields.body.issues() as issue}
+			<p style="color: red">{issue.message}</p>
+		{/each}
+	</label>
+	<button>Create</button>
+</form>
+```
+
+가장 큰 차이는 **validation 보일러플레이트가 사라진다**는 점이다.
+
+기존 방식에서는 클라이언트와 서버의 유효성 검사를 따로따로 작성해야 했다:
+
+|                     | Client-side                                       | Server-side                                              |
+| ------------------- | ------------------------------------------------- | -------------------------------------------------------- |
+| **기존 방식**       | HTML `required` 직접 추가                         | `formData` 수동 파싱 + `fail()`                          |
+| **Remote `form()`** | `preflight(schema)` — 제출 전 클라이언트에서 검증 | `form(schema, ...)` — 같은 스키마로 서버에서도 자동 검증 |
+
+remote `form()`은 **valibot 스키마 하나로 양쪽을 모두 커버**한다:
+
+- `form(schema, handler)`: 서버에서 스키마 기반 자동 검증. `formData` 파싱, 타입 변환, 에러 처리가 한 번에 해결된다.
+- `preflight(schema)`: 제출 전에 클라이언트에서 먼저 검증한다. 실패하면 서버 요청 자체를 보내지 않는다.
+- `fields.title.issues()`: 필드별 에러 메시지를 바로 꺼내 쓸 수 있다.
 
 ---
 
 ## 정리
 
-기존 방식은 서버 코드와 클라이언트 코드가 **여러 파일에 나뉘어져** 있어서 관리가 번거롭다.
+Remote Function은 서버 로직을 `.remote` 파일에 모아두고, 클라이언트에서 **그냥 import해서 쓸 수 있게** 해준다.
 
-Remote Function은 서버 로직을 `.remote` 파일 하나에 모아두고, 클라이언트에서 **그냥 import해서 쓸 수 있게** 해준다.
-
-아직 experimental 딱지가 붙어 있어서 프로덕션에 바로 쓰기엔 조심스럽지만, 방향 자체는 맞다고 생각한다. 서버/클라이언트 경계를 신경 쓰는 게 아니라 기능 단위로 코드를 모아두는 게 훨씬 자연스럽다. stable이 되면 적극적으로 쓸 것 같다.
-
-|           | 기존 방식     | Remote Function |
-| --------- | ------------- | --------------- |
-| 파일 수   | 여러 개       | `.remote` 하나  |
-| URL       | 직접 입력     | 필요 없음       |
-| JSON 변환 | 직접 해야 함  | 자동            |
-| 코드 위치 | 여기저기 분산 | 한 곳에 모임    |
+|                | 기존 방식                        | Remote Function         |
+| -------------- | -------------------------------- | ----------------------- |
+| 데이터 전달    | `load()` → `return` → `$props()` | `await fn()` 바로 호출  |
+| mutation       | `<form>` + action 필수           | `onclick`에서 바로 호출 |
+| validation     | 서버/클라이언트 따로 작성        | 스키마 하나로 양쪽 커버 |
+| 서버 응답 처리 | `page.form`, `result.type` 분기  | 함수 반환값 그대로 사용 |
 
 ## Reference
+
 [Remote Functions - SvelteKit](https://svelte.dev/docs/kit/remote-functions#form)
