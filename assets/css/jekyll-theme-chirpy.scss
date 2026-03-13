@@ -1,0 +1,16 @@
+---
+---
+
+/* prettier-ignore */
+@use 'main
+{%- if jekyll.environment == 'production' -%}
+  .bundle
+{%- endif -%}
+';
+
+/* append your custom style below */
+
+.highlight .err {
+  color: inherit !important;
+  background-color: transparent !important;
+}
