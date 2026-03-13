@@ -1,7 +1,7 @@
 ---
 title: Axios vs Redaxios vs Fetch
 categories: Backend Node.js
-tags: axios redaxios fetch     # TAG names should always be lowercase
+tags: axios redaxios fetch # TAG names should always be lowercase
 date created: 2024-10-26-09:04
 date modified: 2024-11-11-18:05
 ---
@@ -18,7 +18,7 @@ date modified: 2024-11-11-18:05
 - 한계: 사실상 fetch가 기본으로 내장된 Node.js 18이상에서는 필수적이지 않음
 
 ## **Redaxios**
-    
+
 - `fetch`가 Node.js에 내장되면서 등장한 `fetch` 기반 라이브러리
 - `axios`와 비슷한 인터페이스를 제공하며, `fetch`와 호환됨
 - 한계: 기능이 간소화되어 Axios의 고급기능(예: JSON 자동 변환, 인터셉터)은 제공하지 않음
