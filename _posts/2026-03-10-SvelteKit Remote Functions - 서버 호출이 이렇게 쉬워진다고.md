@@ -3,7 +3,7 @@ title: SvelteKit Remote Functions - 서버 호출이 이렇게 쉬워진다고?
 categories: [Web, SvelteKit]
 tags: [sveltekit, svelte, remote-function, typescript]
 date created: 2026-03-11-00:49
-date modified: 2026-03-14-00:08
+date modified: 2026-03-14-02:30
 ---
 
 SvelteKit을 쓰다 보면 서버에서 데이터를 읽거나, 폼을 제출하거나, 버튼 클릭으로 서버 작업을 실행하는 일이 자주 있다.
@@ -99,7 +99,164 @@ export const getPosts = query(async () => {
 
 ---
 
-## 2. command — 버튼 클릭으로 서버 작업 실행
+## 2. form — 폼 제출
+
+> `form` 함수는 서버에 데이터를 쓰기 쉽게 해준다. 제출된 `FormData`에서 만들어진 `data`를 받는 콜백을 인자로 받고, `<form>` 엘리먼트에 spread할 수 있는 객체를 반환한다.
+
+### 기존 방식
+
+`+page.server.ts`에 `actions`를 정의하고, `formData`를 수동으로 파싱하고, 유효성 검사도 직접 작성해야 했다. 클라이언트 쪽에서는 HTML `required` 속성을 따로 추가해야 하고, 서버 응답을 받아 처리하는 코드도 별도로 필요하다.
+
+```ts
+// +page.server.ts
+import { fail } from "@sveltejs/kit";
+
+export const actions = {
+  create: async ({ request, fetch }) => {
+    const formData = await request.formData();
+    const title = formData.get("title")?.toString();
+    const body = formData.get("body")?.toString();
+
+    if (!title || !body) {
+      return fail(400, { message: "Title and body are required" });
+    }
+
+    const response = await fetch("https://jsonplaceholder.typicode.com/posts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, userId: 1 }),
+    });
+
+    if (!response.ok) {
+      return fail(500, { message: "Failed to create post" });
+    }
+
+    const post: { title: string; id: number } = await response.json();
+    return { post };
+  },
+};
+```
+
+```svelte
+<!-- +page.svelte -->
+<script lang="ts">
+	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
+
+	interface Post {
+		title: string;
+		id: number;
+	}
+
+	let result: Post | null = $state(null);
+
+	const form = page.form as { post: Post } | null;
+	$effect(() => {
+		if (form?.post) {
+			result = form.post;
+		}
+	});
+</script>
+
+<h2>Create Post</h2>
+
+<form method="POST" action="?/create" use:enhance>
+	<label>
+		Title
+		<input name="title" type="text" required />
+	</label>
+	<label>
+		Body
+		<textarea name="body" required></textarea>
+	</label>
+	<button>Create</button>
+</form>
+
+{#if result}
+	<p>Created: {result.title} (id: {result.id})</p>
+{/if}
+```
+
+서버에서는 `formData.get()`으로 하나하나 꺼내서 `?.toString()`으로 변환하고, `if (!title || !body)` 같은 검사를 직접 작성해야 한다. 클라이언트에서는 HTML `required`로 같은 검증을 **또** 작성하고, 서버 응답을 받으려면 `page.form`에서 `$effect`로 꺼내야 한다.
+
+### Remote Function 방식
+
+```ts
+// data.ts
+import * as v from "valibot";
+
+export const Schema = v.object({
+  title: v.pipe(v.string(), v.nonEmpty()),
+  body: v.pipe(v.string(), v.nonEmpty()),
+});
+```
+
+```ts
+// data.remote.ts
+import { form } from "$app/server";
+import { Schema } from "./data";
+
+export const createPost = form(Schema, async ({ title, body }) => {
+  const response = await fetch("https://jsonplaceholder.typicode.com/posts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, body, userId: 1 }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to create post");
+  }
+
+  return await response.json();
+});
+```
+
+```svelte
+<!-- +page.svelte -->
+<script>
+	import { createPost } from './data.remote';
+	import { Schema } from './data';
+</script>
+
+<h2>Create Post</h2>
+
+<form {...createPost.preflight(Schema)}>
+	<label>
+		Title
+		<input {...createPost.fields.title.as('text')} />
+		{#each createPost.fields.title.issues() as issue}
+			<p style="color: red">{issue.message}</p>
+		{/each}
+	</label>
+	<label>
+		Body
+		<textarea {...createPost.fields.body.as('text')}></textarea>
+		{#each createPost.fields.body.issues() as issue}
+			<p style="color: red">{issue.message}</p>
+		{/each}
+	</label>
+	<button>Create</button>
+</form>
+```
+
+가장 큰 차이는 **validation 보일러플레이트가 사라진다**는 점이다.
+
+기존 방식에서는 클라이언트와 서버의 유효성 검사를 따로따로 작성해야 했다:
+
+|                     | Client-side                                       | Server-side                                              |
+| ------------------- | ------------------------------------------------- | -------------------------------------------------------- |
+| **기존 방식**       | HTML `required` 직접 추가                         | `formData` 수동 파싱 + `fail()`                          |
+| **Remote `form()`** | `preflight(schema)` — 제출 전 클라이언트에서 검증 | `form(schema, ...)` — 같은 스키마로 서버에서도 자동 검증 |
+
+remote `form()`은 **valibot 스키마 하나로 양쪽을 모두 커버**한다. 스키마는 `.remote.ts`에 넣을 수 없으므로(모든 export가 remote function이어야 함) 별도 `data.ts`에 분리한다:
+
+- `form(Schema, handler)`: 서버에서 스키마 기반 자동 검증. `formData` 파싱, 타입 변환, 에러 처리가 한 번에 해결된다.
+- `preflight(Schema)`: 제출 전에 클라이언트에서 먼저 검증한다. 실패하면 서버 요청 자체를 보내지 않는다.
+- `fields.title.issues()`: 필드별 에러 메시지를 바로 꺼내 쓸 수 있다.
+
+---
+
+## 3. command — 버튼 클릭으로 서버 작업 실행
 
 > `command` 함수는 `form`과 마찬가지로 서버에 데이터를 쓸 수 있게 해준다. `form`과 다른 점은 특정 엘리먼트에 종속되지 않아서 어디서든 호출할 수 있다는 것이다.
 
@@ -198,164 +355,6 @@ export const addLike = command(async () => {
 ```
 
 `<form>` 없이 `onclick`에서 바로 `await addLike()`를 호출한다. form action, `use:enhance`, `result.type` 분기가 전부 사라지고, 일반적인 이벤트 핸들러 패턴 그대로 서버 작업을 실행할 수 있다.
-
----
-
-## 3. form — 폼 제출
-
-> `form` 함수는 서버에 데이터를 쓰기 쉽게 해준다. 제출된 `FormData`에서 만들어진 `data`를 받는 콜백을 인자로 받고, `<form>` 엘리먼트에 spread할 수 있는 객체를 반환한다.
-
-### 기존 방식
-
-`+page.server.ts`에 `actions`를 정의하고, `formData`를 수동으로 파싱하고, 유효성 검사도 직접 작성해야 했다. 클라이언트 쪽에서는 HTML `required` 속성을 따로 추가해야 하고, 서버 응답을 받아 처리하는 코드도 별도로 필요하다.
-
-```ts
-// +page.server.ts
-import { fail } from "@sveltejs/kit";
-
-export const actions = {
-  create: async ({ request, fetch }) => {
-    const formData = await request.formData();
-    const title = formData.get("title")?.toString();
-    const body = formData.get("body")?.toString();
-
-    if (!title || !body) {
-      return fail(400, { message: "Title and body are required" });
-    }
-
-    const response = await fetch("https://jsonplaceholder.typicode.com/posts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, body, userId: 1 }),
-    });
-
-    if (!response.ok) {
-      return fail(500, { message: "Failed to create post" });
-    }
-
-    const post: { title: string; id: number } = await response.json();
-    return { post };
-  },
-};
-```
-
-```svelte
-<!-- +page.svelte -->
-<script lang="ts">
-	import { enhance } from '$app/forms';
-	import { page } from '$app/state';
-
-	interface Post {
-		title: string;
-		id: number;
-	}
-
-	let result: Post | null = $state(null);
-
-	const form = page.form as { post: Post } | null;
-	$effect(() => {
-		if (form?.post) {
-			result = form.post;
-		}
-	});
-</script>
-
-<h2>Create Post</h2>
-
-<form method="POST" action="?/create" use:enhance>
-	<label>
-		Title
-		<input name="title" type="text" required />
-	</label>
-	<label>
-		Body
-		<textarea name="body" required></textarea>
-	</label>
-	<button>Create</button>
-</form>
-
-{#if result}
-	<p>Created: {result.title} (id: {result.id})</p>
-{/if}
-```
-
-서버에서는 `formData.get()`으로 하나하나 꺼내서 `?.toString()`으로 변환하고, `if (!title || !body)` 같은 검사를 직접 작성해야 한다. 클라이언트에서는 HTML `required`로 같은 검증을 **또** 작성하고, 서버 응답을 받으려면 `page.form`에서 `$effect`로 꺼내야 한다.
-
-### Remote Function 방식
-
-```ts
-// data.remote.ts
-import * as v from "valibot";
-import { form } from "$app/server";
-
-export const createPost = form(
-  v.object({
-    title: v.pipe(v.string(), v.nonEmpty()),
-    body: v.pipe(v.string(), v.nonEmpty()),
-  }),
-  async ({ title, body }) => {
-    const response = await fetch("https://jsonplaceholder.typicode.com/posts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, body, userId: 1 }),
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to create post");
-    }
-
-    return await response.json();
-  },
-);
-```
-
-```svelte
-<!-- +page.svelte -->
-<script>
-	import { createPost } from './data.remote';
-	import * as v from 'valibot';
-
-	const schema = v.object({
-		title: v.pipe(v.string(), v.nonEmpty('Title is required')),
-		body: v.pipe(v.string(), v.nonEmpty('Body is required'))
-	});
-</script>
-
-<h2>Create Post</h2>
-
-<form {...createPost.preflight(schema)}>
-	<label>
-		Title
-		<input {...createPost.fields.title.as('text')} />
-		{#each createPost.fields.title.issues() as issue}
-			<p style="color: red">{issue.message}</p>
-		{/each}
-	</label>
-	<label>
-		Body
-		<textarea {...createPost.fields.body.as('text')}></textarea>
-		{#each createPost.fields.body.issues() as issue}
-			<p style="color: red">{issue.message}</p>
-		{/each}
-	</label>
-	<button>Create</button>
-</form>
-```
-
-가장 큰 차이는 **validation 보일러플레이트가 사라진다**는 점이다.
-
-기존 방식에서는 클라이언트와 서버의 유효성 검사를 따로따로 작성해야 했다:
-
-|                     | Client-side                                       | Server-side                                              |
-| ------------------- | ------------------------------------------------- | -------------------------------------------------------- |
-| **기존 방식**       | HTML `required` 직접 추가                         | `formData` 수동 파싱 + `fail()`                          |
-| **Remote `form()`** | `preflight(schema)` — 제출 전 클라이언트에서 검증 | `form(schema, ...)` — 같은 스키마로 서버에서도 자동 검증 |
-
-remote `form()`은 **valibot 스키마 하나로 양쪽을 모두 커버**한다:
-
-- `form(schema, handler)`: 서버에서 스키마 기반 자동 검증. `formData` 파싱, 타입 변환, 에러 처리가 한 번에 해결된다.
-- `preflight(schema)`: 제출 전에 클라이언트에서 먼저 검증한다. 실패하면 서버 요청 자체를 보내지 않는다.
-- `fields.title.issues()`: 필드별 에러 메시지를 바로 꺼내 쓸 수 있다.
 
 ---
 
