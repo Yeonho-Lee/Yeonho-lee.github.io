@@ -40,9 +40,19 @@ DB 서버를 따로 운영하지 않아도 되니까 배포와 관리가 훨씬 
 
 또 SQLite는 별도 프로그램이 아니라 백엔드 안에서 돌아가는 **라이브러리**다. 서버형 DB는 쿼리 하나마다 네트워크를 거쳐 DB 서버와 주고받지만, SQLite는 같은 프로세스 안에서 파일을 바로 읽는다. 쿼리 하나하나의 왕복 비용이 작다.
 
+> 💡 정확히는 "SQLite **자체**에는 서버가 없다"이다. SQLite를 서버로 감싸서 네트워크 너머에서 쓰게 해주는 서비스도 있다. [Cloudflare D1](https://developers.cloudflare.com/d1/)은 SQLite 기반의 서버리스 DB이고, [Turso](https://turso.tech/)는 SQLite를 포크한 libSQL에 서버와 복제 기능을 붙였다. Turso는 2026년 10월 [Supabase에 인수](https://www.prnewswire.com/news-releases/supabase-announces-150m-in-new-funding-and-turso-acquisition-302896752.html)됐다.
+
 ### 3. WAL 모드로 읽기와 쓰기를 동시에
 
-SQLite는 기본 설정에서는 누가 쓰는 동안 다른 쪽이 읽기 어렵다. 이걸 개선하는 게 **WAL(Write-Ahead Logging)** 모드다.
+SQLite는 기본 모드(롤백 저널)에서 DB 파일 **전체**에 잠금을 건다.
+
+| 상황 | 잠금 | 다른 연결은 |
+| --- | --- | --- |
+| 읽는 중 | SHARED | 여럿이 동시에 읽을 수 있다 |
+| 쓰기 준비 중 | RESERVED | 읽기는 되지만, 다른 쓰기는 안 된다 |
+| 커밋하는 순간 | EXCLUSIVE | 읽기도 쓰기도 `database is locked` |
+
+게다가 읽는 중인 연결이 남아 있으면, 쓰는 쪽은 EXCLUSIVE 잠금을 잡지 못해 커밋하지 못하고 기다린다. 결국 **읽기와 쓰기가 서로를 막는다.** 이걸 풀어주는 게 **WAL(Write-Ahead Logging)** 모드다.
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -62,9 +72,9 @@ local.db  local.db-shm  local.db-wal   # WAL 켜고 한 번 쓴 뒤
 
 `-wal`이 먼저 기록되는 로그 파일이고, `-shm`은 여러 연결이 WAL 파일을 같이 쓰기 위한 공유 메모리 인덱스다. 이 설정은 DB 파일에 저장돼서, 다음에 다른 프로그램으로 열어도 WAL 모드가 유지된다.
 
-덕분에 한쪽에서 쓰는 동안에도 다른 쪽은 기존 데이터를 계속 읽을 수 있다. 읽는 쪽은 **읽기를 시작한 시점의 스냅샷**을 보기 때문에, 쓰는 도중의 어중간한 데이터를 볼 일도 없다. 여러 버전의 데이터를 동시에 유지해서 읽기와 쓰기가 서로 막지 않게 하는 이 방식을 **MVCC(다중 버전 동시성 제어)**라고 부른다.
+덕분에 한쪽에서 쓰는 동안에도 다른 쪽은 기존 데이터를 계속 읽을 수 있다. 읽는 쪽은 **읽기를 시작한 시점의 스냅샷**을 보기 때문에, 쓰는 도중의 어중간한 데이터를 볼 일도 없다. 여러 버전의 데이터를 동시에 유지해서 읽기와 쓰기가 서로 막지 않게 하는 이 방식을 **MVCC(다중 버전 동시성 제어)**라고 부른다. WAL에서는 읽기와 쓰기가 서로를 막지 않는다.
 
-그래도 **쓰기는 한 번에 하나**만 가능하다. 한쪽 연결이 쓰기 잠금을 잡고 있을 때, 다른 연결에서 쓰기를 시도해 보면 차이가 보인다.
+그래도 **쓰기끼리는 여전히 한 번에 하나**만 가능하다. 한쪽 연결이 쓰기 잠금을 잡고 있을 때, 다른 연결에서 쓰기를 시도해 보면 차이가 보인다.
 
 ```ts
 const holder = new DatabaseSync('local.db');
@@ -76,11 +86,13 @@ writer.exec("INSERT INTO students (name) VALUES ('대기')");
 
 | `timeout` | 결과 |
 | --- | --- |
-| `0` (기본값) | 즉시 `database is locked` 에러 |
+| `0` (`node:sqlite` 기본값) | 즉시 `database is locked` 에러 |
 | `1000` | 약 1초 기다린 뒤 `database is locked` 에러 |
 | `5000` (잠금이 0.5초 뒤 풀릴 때) | 약 0.5초 기다린 뒤 **성공** |
 
 `timeout`은 그 시간 안에 잠금이 풀리면 이어서 쓰고, 끝까지 안 풀릴 때만 에러를 낸다. 반대로 같은 상황에서 **읽기는 기다리지 않고 바로 성공**한다. 이게 앞에서 말한 WAL의 장점이다.
+
+> 💡 SQLite 자체는 기본적으로 잠금이 풀리길 기다리지 않는다. 다만 감싸는 라이브러리마다 기본값이 다르다. `node:sqlite`는 0이라 바로 에러가 나고, `better-sqlite3`는 5초를 기다린다. 쓰는 라이브러리의 기본값을 꼭 확인하자.
 
 > 💡 그래서 여러 프로세스가 같은 DB 파일에 쓸 수 있다면 `timeout`을 주는 게 좋다. 지금 프로젝트에서는 `timeout: 5000`을 줘서, 다른 쪽이 쓰고 있으면 바로 에러를 내지 않고 최대 5초까지 기다리게 했다.
 
@@ -90,6 +102,8 @@ writer.exec("INSERT INTO students (name) VALUES ('대기')");
 - **서버를 여러 대로 늘려야 하는 서비스**: DB가 서버 한 대의 파일이라, 여러 서버가 같은 DB를 나눠 쓰기 어렵다.
 
 이런 한계가 문제가 되면 PostgreSQL 같은 서버형 DB나, 그걸 클라우드로 제공하는 **Supabase** 같은 SaaS를 고려하게 된다.
+
+반대로 SQLite에 서버와 복제를 붙여 이 한계를 넘으려는 시도도 있다. 앞에서 본 Turso, Cloudflare D1 말고도, 여러 서버가 같은 SQLite를 나눠 쓰게 해주는 [rqlite](https://rqlite.io/), [LiteFS](https://fly.io/docs/litefs/) 같은 도구가 있다.
 
 ## 그래서 이런 서비스에 맞다
 
@@ -103,6 +117,21 @@ writer.exec("INSERT INTO students (name) VALUES ('대기')");
 이 정도 규모라면 DB 서버를 따로 운영하는 비용보다 파일 하나로 끝나는 단순함이 더 크다.
 
 > 💡 지금 프로젝트는 서버 한 대에서 돌아가고, 사용자가 주로 내부 직원이라 쓰기 요청이 많지 않다. 네 가지 조건에 모두 해당해서 SQLite를 쓰고 있다.
+
+### 조건을 벗어나도 생각보다 멀리 간다
+
+위 체크리스트는 "고민 없이 맞는 경우"일 뿐이다. SQLite로 꽤 큰 트래픽을 처리하는 사례도 많다.
+
+- **SQLite 공식 사이트**는 SQLite로 하루 40~50만 건의 요청을 처리한다(2015년 기준). [공식 문서](https://www.sqlite.org/whentouse.html)는 "하루 10만 히트 이하라면 문제없다"고 하면서도, 이건 보수적으로 잡은 수치라고 말한다.
+- **Expensify**는 SQLite를 고쳐 만든 자체 DB(Bedrock)로, 서버 한 대에서 읽기 위주 벤치마크 기준 [초당 400만 쿼리](https://use.expensify.com/blog/scaling-sqlite-to-4m-qps-on-a-single-server)를 처리한 결과를 공개했다.
+- **Rails 8**은 SQLite를 개발용이 아니라 프로덕션에서도 쓸 수 있는 DB로 공식 지원하기 시작했다.
+
+이런 사례는 보통 몇 가지 최적화를 같이 쓴다.
+
+- WAL 모드 + `PRAGMA synchronous = NORMAL`
+- 여러 쓰기를 **하나의 트랜잭션으로 묶기**
+- 쓰기를 한 곳(큐)으로 모아 순서대로 처리하기
+- [Litestream](https://litestream.io/) 같은 도구로 실시간 백업과 복제
 
 ## Drizzle을 같이 쓰면 좋은 이유
 
