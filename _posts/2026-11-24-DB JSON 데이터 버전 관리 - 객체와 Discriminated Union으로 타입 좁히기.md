@@ -34,6 +34,8 @@ export const retrospective = sqliteTable('retrospective', {
 
 그런데 이번에 리팩토링을 하면서 두 가지 문제가 드러났다.
 
+---
+
 ## 문제 1: `string[]`은 각 자리에 뭐가 들어 있는지 모른다
 
 ```ts
@@ -59,6 +61,8 @@ export const retrospective = sqliteTable('retrospective', {
 이렇게 바꾸면 내용을 이제 `data.problem`처럼 이름으로 꺼내기 때문에 코드에서 어떤 걸 사용하는지가 명시적이고, v2 데이터를 KPT로 읽으려 하면 컴파일 에러가 난다.
 
 > **cf.** 이름 붙은 튜플(Labeled Tuple) `[keep: string, problem: string, try: string]`도 있지만, 이름은 type에만 붙고 접근은 여전히 `data[1]`이라 코드에 드러나지 않는다.
+
+---
 
 ## 문제 2: `version`이 별개의 column이라 type이 좁혀지지 않는다
 
@@ -119,6 +123,8 @@ if (data.version === 1) {
 ```
 
 원래는 `as`로 잘못 단언해도 컴파일러가 몰랐지만, 이제는 버전에 맞지 않는 필드를 쓰는 순간 에러가 난다.
+
+---
 
 ## 마치며
 
