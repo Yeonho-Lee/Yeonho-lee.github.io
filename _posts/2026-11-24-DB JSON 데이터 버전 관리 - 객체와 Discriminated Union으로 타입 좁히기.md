@@ -4,7 +4,6 @@ categories: [Web, TypeScript]
 tags: [typescript, type-narrowing, discriminated-union, drizzle]
 date created: 2026-11-20
 ---
-
 이전에 프로젝트 기획을 하면서 저장 형식이 정책에 따라 바뀔 수 있는 데이터가 있었는데, 이걸 버전으로 관리하기로 결정했다. 이때 버전을 DB에 저장은 해야 하니까 별도 column으로 둬버리고 잊고 있었다. 심지어 `data`는 `text({ mode: 'json' })`, type은 `string[]`으로 저장했다.
 
 실제 데이터 대신 회고 기록을 예로 들어보겠다. 처음에는 **KPT** 방식으로 회고를 쓰다가, 나중에 **4L** 방식으로 바꿨다고 해보자.
@@ -27,10 +26,12 @@ export const retrospective = sqliteTable('retrospective', {
 });
 ```
 
+
 | id  | version | data                                                                               |
 | --- | ------- | ---------------------------------------------------------------------------------- |
 | 1   | 1       | `["PR 리뷰를 하루 안에 끝냈다", "배포 전에 테스트를 못 돌렸다", "배포 체크리스트 만들기"]`                         |
 | 2   | 2       | `["페어 프로그래밍이 재밌었다", "Drizzle 마이그레이션 흐름", "회의가 길어서 개발 시간이 부족했다", "회의는 30분 안에 끝내기"]` |
+
 
 그런데 이번에 리팩토링을 하면서 두 가지 문제가 드러났다.
 
@@ -41,9 +42,16 @@ export const retrospective = sqliteTable('retrospective', {
 ```ts
 const problem = row.data[1];
 // v1이면 Problem, v2면 Learned. 둘 다 string이라 컴파일러는 모른다
+// noUncheckedIndexedAccess를 켜면 string | undefined
 ```
 
 각 인덱스의 뜻은 주석이나 코드를 짠 사람의 머릿속에만 있고, TypeScript는 알 수 없다. 그래서 v2 데이터를 KPT로 읽어도 컴파일 에러 없이 Problem 자리에 Learned가 그대로 표시된다.
+
+
+
+게다가 `noUncheckedIndexedAccess` 옵션을 켜 두면 인덱스로 꺼낸 값은 `string | undefined`로 추론된다. TypeScript는 배열 길이를 모르기 때문에, 그 자리에 값이 있는지도 보장하지 못한다.
+
+
 
 ### 해결: `string[]` 대신 객체로 바꾼다
 
@@ -61,6 +69,11 @@ export const retrospective = sqliteTable('retrospective', {
 이렇게 바꾸면 내용을 이제 `data.problem`처럼 이름으로 꺼내기 때문에 코드에서 어떤 걸 사용하는지가 명시적이고, v2 데이터를 KPT로 읽으려 하면 컴파일 에러가 난다.
 
 > **cf.** 이름 붙은 튜플(Labeled Tuple) `[keep: string, problem: string, try: string]`도 있지만, 이름은 type에만 붙고 접근은 여전히 `data[1]`이라 코드에 드러나지 않는다.
+
+> **cf.** 배열에도 장점은 있다. 배열은 값만 저장하지만, 객체는 행마다 `"keep"`, `"problem"` 같은 키 이름까지 같이 저장한다. 저장 용량만 보면 배열이 유리하다.
+> 그래도 이번 프로젝트는 데이터 양이 많지 않아서 용량보다는 코드가 안전한 게 더 중요했다.
+
+
 
 ---
 
@@ -83,6 +96,17 @@ if (row.version === 1) {
 
 하지만 이 코드에는 문제가 있다. `as`는 검사를 건너뛰는 거라 잘못 단언해도 컴파일러가 잡지 못한다. 문제는 런타임에 가서야 드러난다.
 예를 들어 `KptData | FourLData`를 `KptData`로 단언하면, 실제로는 `FourLData`여도 컴파일 에러가 안 난다. 둘 중 하나를 고르는 단언이라 TS는 그냥 믿어준다. 그러면 `data.problem`은 `undefined`가 되고, `data.problem.trim()`처럼 메서드를 부르는 순간 `TypeError`가 난다.
+
+사실 가장 깔끔한 방법은 `version` column은 그대로 두고, 행 전체를 유니온으로 지정하는 것이다.
+
+```ts
+type Row =
+	| { version: 1; data: KptData }
+	| { version: 2; data: FourLData };
+```
+
+이러면 `row.version === 1`만 확인해도 `row.data`가 KPT로 좁혀진다. 하지만 Drizzle은 `$type()`을 column마다 따로 지정할 뿐이라, "version이 1이면 data는 KptData"처럼 column끼리 연결된 행 type은 만들 수 없다. 그래서 `version`을 `data` 안으로 옮기기로 했다.
+
 
 ### 해결: `data` 안에 `version`을 넣는다 (Discriminated Union)
 
